@@ -186,6 +186,21 @@ body {
     min-width: 35px;
 }
 
+/* Map Panel */
+.map-panel {
+    margin-bottom: 20px;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#map {
+    height: 200px;
+    width: 100%;
+    background: #1a1a2e;
+}
+
 /* Preview Section */
 .preview-section h3 {
     margin-bottom: 12px;

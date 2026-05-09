@@ -5,6 +5,8 @@ let currentPhotoBlob = null;
 let currentPhotoType = ''; // 'selfie', 'objek', 'upload'
 let currentLocation = null;
 let currentTimestamp = null;
+let map = null;
+let marker = null;
 
 // DOM Elements
 const video = document.getElementById('video');
@@ -25,8 +27,24 @@ const statusDiv = document.getElementById('status');
 
 // ==================== INITIALIZATION ====================
 async function init() {
+    initMap(); // Inisialisasi peta kosong
     await getLocationAndTime();
     await startCamera('user');
+}
+
+// ==================== INITIALIZE MAP ====================
+function initMap() {
+    // Default: Indonesia (Jakarta) jika belum ada lokasi
+    const defaultLat = -6.2088;
+    const defaultLng = 106.8456;
+    
+    map = L.map('map').setView([defaultLat, defaultLng], 13);
+    
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    marker = L.marker([defaultLat, defaultLng]).addTo(map);
 }
 
 // ==================== GET LOCATION & TIME ====================
@@ -60,6 +78,12 @@ async function getLocationAndTime() {
             const lng = position.coords.longitude;
             currentLocation = { lat, lng };
             coordText.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+
+            // Update Map
+            if (map && marker) {
+                map.setView([lat, lng], 15);
+                marker.setLatLng([lat, lng]);
+            }
 
             try {
                 // Reverse geocoding
