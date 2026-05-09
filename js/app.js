@@ -32,6 +32,7 @@ async function init() {
 // ==================== GET LOCATION & TIME ====================
 async function getLocationAndTime() {
     statusDiv.textContent = '📍 Mendapatkan lokasi...';
+    locationText.textContent = 'Mencari sinyal GPS...';
 
     // Get timestamp
     const now = new Date();
@@ -48,45 +49,60 @@ async function getLocationAndTime() {
 
     // Get location
     if ('geolocation' in navigator) {
-        try {
-            const position = await new Promise((resolve, reject) => {
-                navigator.geolocation.getCurrentPosition(resolve, reject, {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
-                });
-            });
+        const geoOptions = {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
+        };
 
+        const success = async (position) => {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
             currentLocation = { lat, lng };
             coordText.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 
-            // Reverse geocoding (nama lokasi)
             try {
-                const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`);
+                // Reverse geocoding
+                const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
+                    headers: { 'Accept-Language': 'id' }
+                });
                 const geoData = await geoRes.json();
-                const address = geoData.display_name?.split(',')[0] || 'Lokasi tidak diketahui';
-                locationText.textContent = address;
+                const address = geoData.display_name?.split(',')[0] || 'Lokasi terdeteksi';
+                const city = geoData.address?.city || geoData.address?.town || geoData.address?.county || '';
+                locationText.textContent = city ? `${address}, ${city}` : address;
+                statusDiv.textContent = '✅ Lokasi berhasil didapatkan';
             } catch {
                 locationText.textContent = `Koordinat: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+                statusDiv.textContent = '✅ Lokasi didapat (Nama alamat tidak tersedia)';
             }
+        };
 
-            statusDiv.textContent = '✅ Lokasi berhasil didapatkan';
-        } catch (error) {
-            console.error('Location error:', error);
-            locationText.textContent = '❌ Gagal dapat lokasi. Izinkan akses lokasi.';
-            coordText.textContent = '-';
-            statusDiv.textContent = '⚠️ Lokasi tidak dapat diakses. Periksa izin GPS.';
-        }
+        const error = (err) => {
+            console.error('Location error:', err);
+            let msg = '❌ Gagal dapat lokasi.';
+            if (err.code === 1) msg = '❌ Izin lokasi ditolak. Cek pengaturan browser.';
+            if (err.code === 2) msg = '❌ Sinyal GPS tidak tersedia.';
+            if (err.code === 3) {
+                msg = '⏳ Timeout. Mencoba akurasi rendah...';
+                // Fallback ke akurasi rendah jika high accuracy timeout
+                navigator.geolocation.getCurrentPosition(success, (e) => {
+                    locationText.textContent = '❌ Gagal mendapatkan lokasi.';
+                    statusDiv.textContent = '⚠️ GPS Timeout atau tidak aktif.';
+                }, { enableHighAccuracy: false, timeout: 10000 });
+            }
+            locationText.textContent = msg;
+            statusDiv.textContent = '⚠️ Masalah lokasi: ' + err.message;
+        };
+
+        navigator.geolocation.getCurrentPosition(success, error, geoOptions);
     } else {
         locationText.textContent = '❌ Browser tidak support GPS';
         statusDiv.textContent = '❌ Perangkat tidak mendukung Geolocation.';
     }
 
-    // Check if Secure Context (Geolocation requires HTTPS)
+    // Check if Secure Context
     if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-        statusDiv.innerHTML = '⚠️ <b>Peringatan:</b> Lokasi butuh <b>HTTPS</b> untuk bekerja di HP. <br>Coba gunakan <i>localhost</i> atau hosting aman.';
+        statusDiv.innerHTML = '⚠️ <b>Peringatan:</b> Lokasi butuh <b>HTTPS</b>. <br>Gunakan hosting dengan SSL (seperti GitHub Pages/Vercel).';
         statusDiv.style.color = '#ff9f43';
     }
 }
