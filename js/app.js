@@ -171,7 +171,7 @@ async function switchCamera() {
 }
 
 // ==================== CAPTURE PHOTO ====================
-function capturePhoto(type) {
+async function capturePhoto(type) {
     if (!video.videoWidth || !video.videoHeight) {
         statusDiv.textContent = '❌ Kamera belum siap. Tunggu sebentar.';
         return;
@@ -189,7 +189,7 @@ function capturePhoto(type) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     // Add watermark
-    addWatermark(canvas);
+    await addWatermark(canvas);
 
     // Convert to blob
     canvas.toBlob((blob) => {
@@ -209,9 +209,46 @@ function capturePhoto(type) {
 }
 
 // ==================== WATERMARK LOGIC ====================
-function addWatermark(canvas) {
+async function addWatermark(canvas) {
     const ctx = canvas.getContext('2d');
     
+    // 1. TAMBAHKAN MINI MAP DI POJOK ATAS (Jika lokasi tersedia)
+    if (currentLocation) {
+        try {
+            const { lat, lng } = currentLocation;
+            // Gunakan OpenStreetMap Static Map API
+            const mapSize = Math.floor(canvas.height * 0.25); // Ukuran peta 25% dari tinggi foto
+            const staticMapUrl = `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=14&size=${mapSize}x${mapSize}&markers=${lat},${lng},ol-marker`;
+            
+            const mapImg = new Image();
+            mapImg.crossOrigin = "anonymous"; // Penting untuk canvas
+            mapImg.src = staticMapUrl;
+            
+            await new Promise((resolve, reject) => {
+                mapImg.onload = resolve;
+                mapImg.onerror = reject;
+                // Timeout jika gagal load peta dalam 3 detik
+                setTimeout(resolve, 3000); 
+            });
+
+            if (mapImg.complete && mapImg.naturalWidth > 0) {
+                const margin = 20;
+                const mapX = canvas.width - mapSize - margin;
+                const mapY = margin;
+                
+                // Gambar border putih untuk peta
+                ctx.fillStyle = 'white';
+                ctx.fillRect(mapX - 5, mapY - 5, mapSize + 10, mapSize + 10);
+                
+                // Gambar peta
+                ctx.drawImage(mapImg, mapX, mapY, mapSize, mapSize);
+            }
+        } catch (e) {
+            console.error("Gagal memuat mini map watermark:", e);
+        }
+    }
+
+    // 2. TAMBAHKAN TEKS WATERMARK DI BAWAH
     // Ukuran font dinamis berdasarkan tinggi canvas (sekitar 3% dari tinggi)
     const fontSize = Math.max(14, Math.floor(canvas.height * 0.03));
     ctx.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
@@ -226,7 +263,7 @@ function addWatermark(canvas) {
     const padding = fontSize;
     const watermarkY = canvas.height - padding;
     const timeText = currentTimestamp || new Date().toLocaleString('id-ID');
-    const locText = locationText.textContent.includes('❌') || locationText.textContent.includes('Mendapatkan') 
+    const locText = locationText.textContent.includes('❌') || locationText.textContent.includes('Mendapatkan') || locationText.textContent.includes('Mencari')
         ? 'Lokasi tidak tersedia' 
         : locationText.textContent;
 
@@ -234,7 +271,7 @@ function addWatermark(canvas) {
     ctx.fillText(`📍 ${locText}`, padding, watermarkY - (fontSize * 1.5));
     ctx.fillText(`🕐 ${timeText}`, padding, watermarkY);
     
-    // Reset shadow agar tidak mengganggu operasi gambar lain jika ada
+    // Reset shadow
     ctx.shadowColor = 'transparent';
     ctx.shadowBlur = 0;
     ctx.shadowOffsetX = 0;
@@ -251,7 +288,7 @@ function handleFileUpload(event) {
     const reader = new FileReader();
     reader.onload = (e) => {
         const img = new Image();
-        img.onload = () => {
+        img.onload = async () => {
             const canvas = document.createElement('canvas');
             
             // Gunakan resolusi asli gambar
@@ -263,7 +300,7 @@ function handleFileUpload(event) {
             ctx.drawImage(img, 0, 0);
 
             // Tambahkan watermark
-            addWatermark(canvas);
+            await addWatermark(canvas);
 
             // Tampilkan hasil
             canvas.toBlob((blob) => {
