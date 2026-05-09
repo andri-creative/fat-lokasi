@@ -86,18 +86,18 @@ async function getLocationAndTime() {
             }
 
             try {
-                // Reverse geocoding
+                // Reverse geocoding - AMBIL ALAMAT LENGKAP
                 const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
                     headers: { 'Accept-Language': 'id' }
                 });
                 const geoData = await geoRes.json();
-                const address = geoData.display_name?.split(',')[0] || 'Lokasi terdeteksi';
-                const city = geoData.address?.city || geoData.address?.town || geoData.address?.county || '';
-                locationText.textContent = city ? `${address}, ${city}` : address;
-                statusDiv.textContent = '✅ Lokasi berhasil didapatkan';
-            } catch {
+                const fullAddress = geoData.display_name || 'Lokasi terdeteksi';
+                locationText.textContent = fullAddress;
+                statusDiv.textContent = '✅ Lokasi & Alamat berhasil didapatkan';
+            } catch (e) {
+                console.error("Geocoding error:", e);
                 locationText.textContent = `Koordinat: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-                statusDiv.textContent = '✅ Lokasi didapat (Nama alamat tidak tersedia)';
+                statusDiv.textContent = '✅ Lokasi didapat (Detail alamat gagal dimuat)';
             }
         };
 
@@ -216,60 +216,113 @@ async function addWatermark(canvas) {
     if (currentLocation) {
         try {
             const { lat, lng } = currentLocation;
-            // Gunakan OpenStreetMap Static Map API
             const mapSize = Math.floor(canvas.height * 0.25); // Ukuran peta 25% dari tinggi foto
-            const staticMapUrl = `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=14&size=${mapSize}x${mapSize}&markers=${lat},${lng},ol-marker`;
+            
+            // Gunakan Yandex Static Maps (Lebih stabil & support CORS)
+            // Format Yandex: lng,lat
+            const staticMapUrl = `https://static-maps.yandex.ru/1.x/?ll=${lng},${lat}&z=14&l=map&size=${mapSize},${mapSize}`;
+            
+            // Fallback URL jika Yandex gagal (OSM)
+            const fallbackUrl = `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=14&size=${mapSize}x${mapSize}&markers=${lat},${lng},ol-marker`;
             
             const mapImg = new Image();
-            mapImg.crossOrigin = "anonymous"; // Penting untuk canvas
-            mapImg.src = staticMapUrl;
+            mapImg.crossOrigin = "anonymous"; 
             
-            await new Promise((resolve, reject) => {
-                mapImg.onload = resolve;
-                mapImg.onerror = reject;
-                // Timeout jika gagal load peta dalam 3 detik
-                setTimeout(resolve, 3000); 
-            });
+            const loadMap = (url) => {
+                return new Promise((resolve, reject) => {
+                    mapImg.onload = resolve;
+                    mapImg.onerror = reject;
+                    mapImg.src = url;
+                    setTimeout(() => reject(new Error("Timeout")), 4000);
+                });
+            };
+
+            try {
+                await loadMap(staticMapUrl);
+            } catch (e) {
+                console.warn("Yandex Map gagal, mencoba fallback...");
+                await loadMap(fallbackUrl).catch(() => null);
+            }
 
             if (mapImg.complete && mapImg.naturalWidth > 0) {
                 const margin = 20;
                 const mapX = canvas.width - mapSize - margin;
                 const mapY = margin;
                 
-                // Gambar border putih untuk peta
+                // Gambar border putih tebal agar terlihat di foto gelap/terang
                 ctx.fillStyle = 'white';
-                ctx.fillRect(mapX - 5, mapY - 5, mapSize + 10, mapSize + 10);
+                ctx.fillRect(mapX - 8, mapY - 8, mapSize + 16, mapSize + 16);
                 
                 // Gambar peta
                 ctx.drawImage(mapImg, mapX, mapY, mapSize, mapSize);
+                
+                // Tambahkan marker merah manual di tengah peta agar lebih jelas
+                ctx.fillStyle = 'red';
+                ctx.beginPath();
+                ctx.arc(mapX + mapSize/2, mapY + mapSize/2, 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.stroke();
             }
         } catch (e) {
             console.error("Gagal memuat mini map watermark:", e);
         }
     }
 
-    // 2. TAMBAHKAN TEKS WATERMARK DI BAWAH
-    // Ukuran font dinamis berdasarkan tinggi canvas (sekitar 3% dari tinggi)
-    const fontSize = Math.max(14, Math.floor(canvas.height * 0.03));
+    // 2. TAMBAHKAN TEKS WATERMARK DI BAWAH (Dengan Text Wrapping)
+    const fontSize = Math.max(14, Math.floor(canvas.height * 0.028)); // Sedikit lebih kecil agar muat banyak
     ctx.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
     ctx.fillStyle = 'white';
     
-    // Shadow untuk keterbacaan di background terang
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-    ctx.shadowBlur = Math.max(2, fontSize / 4);
+    // Shadow untuk keterbacaan
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+    ctx.shadowBlur = 6;
     ctx.shadowOffsetX = 2;
     ctx.shadowOffsetY = 2;
 
-    const padding = fontSize;
-    const watermarkY = canvas.height - padding;
+    const padding = fontSize * 1.5;
+    const maxWidth = canvas.width - (padding * 2);
+    const lineHeight = fontSize * 1.4;
+    
     const timeText = currentTimestamp || new Date().toLocaleString('id-ID');
     const locText = locationText.textContent.includes('❌') || locationText.textContent.includes('Mendapatkan') || locationText.textContent.includes('Mencari')
         ? 'Lokasi tidak tersedia' 
-        : locationText.textContent;
+        : `📍 ${locationText.textContent}`;
 
-    // Gambar teks (Lokasi & Waktu)
-    ctx.fillText(`📍 ${locText}`, padding, watermarkY - (fontSize * 1.5));
-    ctx.fillText(`🕐 ${timeText}`, padding, watermarkY);
+    // Fungsi Pembantu: Wrap Text
+    function wrapText(context, text, maxWidth) {
+        const words = text.split(' ');
+        const lines = [];
+        let currentLine = words[0];
+
+        for (let i = 1; i < words.length; i++) {
+            const word = words[i];
+            const width = context.measureText(currentLine + " " + word).width;
+            if (width < maxWidth) {
+                currentLine += " " + word;
+            } else {
+                lines.push(currentLine);
+                currentLine = word;
+            }
+        }
+        lines.push(currentLine);
+        return lines;
+    }
+
+    const addressLines = wrapText(ctx, locText, maxWidth);
+    
+    // Tentukan posisi Y awal (naik ke atas sebanyak jumlah baris)
+    let currentY = canvas.height - padding - (addressLines.length * lineHeight);
+
+    // Gambar Alamat (Baris per Baris)
+    addressLines.forEach((line) => {
+        ctx.fillText(line, padding, currentY);
+        currentY += lineHeight;
+    });
+
+    // Gambar Jam/Waktu (Di bawah alamat)
+    ctx.fillText(`🕐 ${timeText}`, padding, currentY);
     
     // Reset shadow
     ctx.shadowColor = 'transparent';
